@@ -1,0 +1,16 @@
+version: "3.2"
+networks:
+  default:
+    external:
+      name: freeriver
+services:
+  messages-service:
+    image: colinzeng/messages-service:test-0.1.0
+    container_name: messages-service
+    restart: always
+    ports:
+      - 9091:80
+    environment:
+      - HOST_NAME=messages-service
+      - SEED_NODES.0=akka://messages-service@messages-service:2551
+      - CASSANDRA_CONTRACT_POINTS.0=cassandra1:9042
