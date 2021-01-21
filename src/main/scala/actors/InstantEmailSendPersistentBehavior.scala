@@ -16,18 +16,14 @@ import scala.concurrent.duration.DurationInt
  * @version 1.0, 2021/1/5
  * @since 0.4.1
  */
-object EmailSendPersistentBehavior {
+object InstantEmailSendPersistentBehavior {
 
   // command
   sealed trait Command extends JacksonCborSerializable
 
   case class EmailData(receiver: String, subject: String, content: String, sendTime: LocalDateTime)
 
-  final case class ApplySendEmergencyEmail(emailData: EmailData, replyTo: ActorRef[ApplySendEmailResult]) extends Command
-
-  final case class ApplySendInstantEmail(emailData: EmailData, overdueTime: LocalDateTime, replyTo: ActorRef[ApplySendEmailResult]) extends Command
-
-  final case class ApplySendTimeUnlimitedEmail(emailData: EmailData, replyTo: ActorRef[ApplySendEmailResult]) extends Command
+  final case class ApplySendEmail(emailData: EmailData, overdueTime: LocalDateTime, replyTo: ActorRef[ApplySendEmailResult]) extends Command
 
   // reply
   sealed trait Reply extends JacksonCborSerializable
@@ -41,43 +37,33 @@ object EmailSendPersistentBehavior {
   // event
   sealed trait Event extends JacksonJsonSerializable
 
-  final case class EmergencyEmail(emailData: EmailData) extends Event
-
-  final case class InstantEmail(emailData: EmailData, overdueTime: LocalDateTime) extends Event
-
-  final case class TimeUnlimitedEmail(emailData: EmailData) extends Event
+  final case class Email(emailData: EmailData, overdueTime: LocalDateTime) extends Event
 
   // state
   final case class State() extends JacksonCborSerializable {
 
     def applyCommand(command: Command): Effect[Event, State] = {
       command match {
-        case ApplySendEmergencyEmail(emailData, replyTo) =>
-          val email = EmergencyEmail(emailData)
-          Effect.persist(email).thenReply(replyTo)(_ => ApplySendEmailSuccess)
-        case ApplySendInstantEmail(emailData, overdueTime, replyTo) =>
+        case ApplySendEmail(emailData, overdueTime, replyTo) =>
           val now = LocalDateTime.now()
           if (now.isAfter(overdueTime)) {
             Effect.none.thenReply(replyTo)(_ => ApplySendEmailOverdued)
           }
           else {
-            val instantEmail = InstantEmail(emailData, overdueTime)
+            val instantEmail = Email(emailData, overdueTime)
             Effect.persist(instantEmail).thenReply(replyTo)(_ => ApplySendEmailSuccess)
           }
-        case ApplySendTimeUnlimitedEmail(emailData, replyTo) =>
-          val email = TimeUnlimitedEmail(emailData)
-          Effect.persist(email).thenReply(replyTo)(_ => ApplySendEmailSuccess)
       }
     }
 
   }
 
-  def persistenceId() = PersistenceId.ofUniqueId("email-send")
+  def persistenceId() = PersistenceId.ofUniqueId(tag)
 
-  def tag = "email-send"
+  def tag = "instant-email-send"
 
   def apply(): Behavior[Command] = Behaviors.setup { context =>
-    context.log.info("starting email-send persistent actor")
+    context.log.info("starting instant-email-send persistent actor")
     EventSourcedBehavior[Command, Event, State](
       persistenceId = persistenceId(),
       emptyState = State(),
@@ -92,7 +78,7 @@ object EmailSendPersistentBehavior {
   def initSingleton(system: ActorSystem[_]): ActorRef[Command] = {
     val singletonManager = ClusterSingleton(system)
     singletonManager.init {
-      SingletonActor(Behaviors.supervise(EmailSendPersistentBehavior()).onFailure[Exception](SupervisorStrategy.restart), "emailSender")
+      SingletonActor(Behaviors.supervise(InstantEmailSendPersistentBehavior()).onFailure[Exception](SupervisorStrategy.restart), "instantEmailSend")
     }
   }
 

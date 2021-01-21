@@ -4,7 +4,6 @@ import akka.actor.typed.scaladsl.Behaviors
 import akka.cluster.sharding.typed.scaladsl.ClusterSharding
 import akka.http.scaladsl.Http
 import com.github.swagger.akka.SwaggerSite
-import services.EmailService
 
 object App extends SwaggerSite {
 
