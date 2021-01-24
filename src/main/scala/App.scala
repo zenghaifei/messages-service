@@ -4,7 +4,7 @@ import akka.actor.typed.scaladsl.Behaviors
 import akka.cluster.sharding.typed.scaladsl.ClusterSharding
 import akka.http.scaladsl.Http
 import com.github.swagger.akka.SwaggerSite
-import projections.{EmergencyEmailSendProjection, InstantEmailSendProjection}
+import projections.{EmergencyEmailSendProjection, InstantEmailSendProjection, TimeUnlimitedEmailSendProjection}
 import routes.EmailRouter
 import services.EmailService
 
@@ -27,6 +27,7 @@ object App extends SwaggerSite {
 
       EmergencyEmailSendProjection.init(system)
       InstantEmailSendProjection.init(system)
+      TimeUnlimitedEmailSendProjection.init(system)
       context.log.info(s"server started at ${host}:${port}")
       Behaviors.same
     }, "messages-service")
