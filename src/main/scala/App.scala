@@ -4,6 +4,9 @@ import akka.actor.typed.scaladsl.Behaviors
 import akka.cluster.sharding.typed.scaladsl.ClusterSharding
 import akka.http.scaladsl.Http
 import com.github.swagger.akka.SwaggerSite
+import projections.EmergencyEmailSendProjection
+import routes.EmailRouter
+import services.EmailService
 
 object App extends SwaggerSite {
 
@@ -15,11 +18,14 @@ object App extends SwaggerSite {
       val sharding = ClusterSharding(system)
       UserWebsocketsEntity.shardRegion(sharding)
 
-      val routes = concat()
+      val emailService = new EmailService(config)
+      val emailRouter = new EmailRouter(emailService)
+      val routes = concat(emailRouter.routes)
       val host = "0.0.0.0"
       val port = config.getInt("server.port")
       Http().newServerAt(host, port).bind(routes)
 
+      EmergencyEmailSendProjection.init(system)
       context.log.info(s"server started at ${host}:${port}")
       Behaviors.same
     }, "messages-service")

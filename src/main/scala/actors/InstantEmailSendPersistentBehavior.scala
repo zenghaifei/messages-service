@@ -37,7 +37,7 @@ object InstantEmailSendPersistentBehavior {
   // event
   sealed trait Event extends JacksonJsonSerializable
 
-  final case class Email(emailData: EmailData, overdueTime: LocalDateTime) extends Event
+  final case class InstantEmail(emailData: EmailData, overdueTime: LocalDateTime) extends Event
 
   // state
   final case class State() extends JacksonCborSerializable {
@@ -50,7 +50,7 @@ object InstantEmailSendPersistentBehavior {
             Effect.none.thenReply(replyTo)(_ => ApplySendEmailOverdued)
           }
           else {
-            val instantEmail = Email(emailData, overdueTime)
+            val instantEmail = InstantEmail(emailData, overdueTime)
             Effect.persist(instantEmail).thenReply(replyTo)(_ => ApplySendEmailSuccess)
           }
       }

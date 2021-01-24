@@ -45,4 +45,6 @@ class EmailService(config: Config) {
     lookup.run() != null
   }
 
+  def isInvalidEmail(email: String): Boolean = !isValidEmail(email)
+
 }

@@ -33,7 +33,7 @@ object EmergencyEmailSendPersistentBehavior {
   // event
   sealed trait Event extends JacksonJsonSerializable
 
-  final case class Email(emailData: EmailData) extends Event
+  final case class EmergencyEmail(emailData: EmailData) extends Event
 
   // state
   final case class State() extends JacksonCborSerializable {
@@ -41,7 +41,7 @@ object EmergencyEmailSendPersistentBehavior {
     def applyCommand(command: Command): Effect[Event, State] = {
       command match {
         case ApplySendEmail(emailData, replyTo) =>
-          val email = Email(emailData)
+          val email = EmergencyEmail(emailData)
           Effect.persist(email).thenReply(replyTo)(_ => ApplySendEmailSuccess)
       }
     }
