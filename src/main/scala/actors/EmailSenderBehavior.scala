@@ -72,6 +72,7 @@ object EmailSenderBehavior {
           case msg@SendEmail(receiver, subject, content, _, replyTo) =>
             state match {
               case ReadyState =>
+                context.log.info(s"sending email, receiver: ${receiver}, subject: ${subject}")
                 val sendF = emailService.sendEmail(receiver, subject, content)
                 context.pipeToSelf(sendF) {
                   case Success(_) => SendOutSuccess(replyTo)
