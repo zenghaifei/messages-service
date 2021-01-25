@@ -41,7 +41,7 @@ object EmergencyEmailSendProjection {
     handler = () => new EmergencyEmailSendHandler(system)
   )
     .withSaveOffset(afterEnvelopes = 50, afterDuration = 1.seconds)
-    .withRecoveryStrategy(HandlerRecoveryStrategy.retryAndFail(10, delay = 1.seconds))
+    .withRecoveryStrategy(HandlerRecoveryStrategy.retryAndFail(5, delay = 1.seconds))
     .withRestartBackoff(minBackoff = 200.millis, maxBackoff = 20.seconds, randomFactor = 0.1)
 }
 
