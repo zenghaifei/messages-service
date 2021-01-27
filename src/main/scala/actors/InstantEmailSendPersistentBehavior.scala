@@ -32,8 +32,6 @@ object InstantEmailSendPersistentBehavior {
 
   final case object ApplySendEmailSuccess extends ApplySendEmailResult
 
-  final case object ApplySendEmailOverdued extends ApplySendEmailResult
-
   // event
   sealed trait Event extends JacksonJsonSerializable
 
@@ -45,14 +43,8 @@ object InstantEmailSendPersistentBehavior {
     def applyCommand(command: Command): Effect[Event, State] = {
       command match {
         case ApplySendEmail(emailData, overdueTime, replyTo) =>
-          val now = LocalDateTime.now()
-          if (now.isAfter(overdueTime)) {
-            Effect.none.thenReply(replyTo)(_ => ApplySendEmailOverdued)
-          }
-          else {
-            val instantEmail = InstantEmail(emailData, overdueTime)
-            Effect.persist(instantEmail).thenReply(replyTo)(_ => ApplySendEmailSuccess)
-          }
+          val instantEmail = InstantEmail(emailData, overdueTime)
+          Effect.persist(instantEmail).thenReply(replyTo)(_ => ApplySendEmailSuccess)
       }
     }
 

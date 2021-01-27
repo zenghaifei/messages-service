@@ -1,7 +1,7 @@
 package routes
 
 import actors.EmailSenderBehavior.EmailType
-import actors.InstantEmailSendPersistentBehavior.{ApplySendEmailOverdued, ApplySendEmailSuccess}
+import actors.InstantEmailSendPersistentBehavior.ApplySendEmailSuccess
 import actors.{EmergencyEmailSendPersistentBehavior, InstantEmailSendPersistentBehavior, TimeUnlimitedEmailSendPersistentBehavior}
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.AskPattern.Askable
@@ -67,16 +67,11 @@ class EmailRouter(emailService: EmailService)(implicit system: ActorSystem[_]) e
                 case Some(overdueTime) =>
                   val emailData = InstantEmailSendPersistentBehavior.EmailData(receiver, subject, content, sendTime)
                   emailSendActor.ask(replyTo => InstantEmailSendPersistentBehavior.ApplySendEmail(emailData, overdueTime, replyTo))
-                    .map {
-                      case ApplySendEmailOverdued =>
-                        val errorMsg = s"apply send email overdued, receiver: ${receiver}, subject: ${subject}, sendTime: ${sendTime}"
-                        log.warn(errorMsg)
-                        complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(errorMsg)))
-                      case ApplySendEmailSuccess =>
-                        complete(JsObject(
-                          "code" -> JsNumber(0),
-                          "msg" -> JsString("success")
-                        ))
+                    .map { case ApplySendEmailSuccess =>
+                      complete(JsObject(
+                        "code" -> JsNumber(0),
+                        "msg" -> JsString("success")
+                      ))
                     }
               }
             case EmailType.timeUnlimited =>
@@ -104,7 +99,7 @@ class EmailRouter(emailService: EmailService)(implicit system: ActorSystem[_]) e
     sendEmail(EmailType.emergency)
   }
 
-  private def sendInstantEmail = (post & path("messages" / "public" / "email" / "instant" / "send")) {
+  private def sendInstantEmail = (post & path("messages" / "email" / "instant" / "send")) {
     sendEmail(EmailType.instant)
   }
 
