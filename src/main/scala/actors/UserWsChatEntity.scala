@@ -16,23 +16,47 @@ import scala.concurrent.duration.DurationInt
  * @version 1.0, 2021/1/7
  * @since 0.4.1
  */
-object UserWebsocketsEntity {
+object UserWsChatEntity {
 
   // command
   sealed trait Command extends JacksonCborSerializable
 
+  final case class SendMessage(msg: String, replyTo: ActorRef[SendResult]) extends Command
+
+  final case class RegisterWsActor(wsActor: ActorRef[String], replyTo: ActorRef[RegisterWsActorResult]) extends Command
+
   // reply
   sealed trait Reply extends JacksonCborSerializable
+
+  sealed trait SendResult extends Reply
+
+  final case object SendSuccess extends SendResult
+
+  sealed trait RegisterWsActorResult extends Reply
+
+  final case object RegisterWsActorSuccess extends RegisterWsActorResult
 
   // event
   sealed trait Event extends JacksonJsonSerializable
 
   // state
-  final case class State() extends JacksonCborSerializable {
+  final case class State(userId: Long, var wsActorOpt: Option[ActorRef[String]] = None) extends JacksonCborSerializable {
 
-    def applyCommand(command: Command, userId: Long): Effect[Event, State] = ???
+    def applyCommand(command: Command): Effect[Event, State] = {
+      command match {
+        case RegisterWsActor(wsActor, replyTo) =>
+          this.wsActorOpt = Some(wsActor)
+          Effect.none.thenReply(replyTo)(_ => RegisterWsActorSuccess)
+        case SendMessage(msg, replyTo) =>
+          this.wsActorOpt.foreach(_.tell("hello, " + msg))
+          Effect.none.thenReply(replyTo)(_ => SendSuccess)
+      }
+    }
 
-    def applyEvent(event: Event): State = ???
+    def applyEvent(event: Event): State = {
+      // todo: to be implemented
+      this
+    }
   }
 
   val TypeKey = EntityTypeKey[Command]("user-websockets")
@@ -40,7 +64,7 @@ object UserWebsocketsEntity {
   def shardRegion(sharding: ClusterSharding): ActorRef[ShardingEnvelope[Command]] =
     sharding.init {
       Entity(TypeKey) { entityContext =>
-        UserWebsocketsEntity(entityContext.entityId, PersistenceId(entityContext.entityTypeKey.name, entityContext.entityId))
+        UserWsChatEntity(entityContext.entityId, PersistenceId(entityContext.entityTypeKey.name, entityContext.entityId))
       }
     }
 
@@ -52,8 +76,8 @@ object UserWebsocketsEntity {
 
     EventSourcedBehavior[Command, Event, State](
       persistenceId = persistenceId,
-      emptyState = State(),
-      commandHandler = (state, command) => state.applyCommand(command, userId),
+      emptyState = State(userId = userId),
+      commandHandler = (state, command) => state.applyCommand(command),
       eventHandler = (state, event) => state.applyEvent(event)
     )
       .withRetention(RetentionCriteria.snapshotEvery(20, 1))

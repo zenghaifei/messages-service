@@ -1,12 +1,12 @@
-import actors.UserWebsocketsEntity
+import actors.UserWsChatEntity
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import akka.cluster.sharding.typed.scaladsl.ClusterSharding
 import akka.http.scaladsl.Http
 import com.github.swagger.akka.SwaggerSite
 import projections.{EmergencyEmailSendProjection, InstantEmailSendProjection, TimeUnlimitedEmailSendProjection}
-import routes.EmailRouter
-import services.EmailService
+import routes.{EmailRouter, WebsocketRouter}
+import services.{EmailService, UserService}
 
 object App extends SwaggerSite {
 
@@ -16,11 +16,13 @@ object App extends SwaggerSite {
       val config = context.system.settings.config
 
       val sharding = ClusterSharding(system)
-      UserWebsocketsEntity.shardRegion(sharding)
+      UserWsChatEntity.shardRegion(sharding)
 
       val emailService = new EmailService(config)
       val emailRouter = new EmailRouter(emailService)
-      val routes = concat(emailRouter.routes)
+      val userService = new UserService(config)
+      val websocketsRouter = new WebsocketRouter(userService)
+      val routes = concat(emailRouter.routes, websocketsRouter.routes)
       val host = "0.0.0.0"
       val port = config.getInt("server.port")
       Http().newServerAt(host, port).bind(routes)

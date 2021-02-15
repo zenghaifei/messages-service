@@ -14,4 +14,6 @@ object DefinedHeaders {
   val xForwardedFor = "X_FORWARDED_FOR"
 
   val userAgent = "User-Agent"
+
+  val authorization = "Authorization"
 }
