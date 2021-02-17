@@ -11,6 +11,7 @@ import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.util.Timeout
+import routes.EmailRouter.JsonSupport
 import services.EmailService
 import spray.json.{DefaultJsonProtocol, JsNumber, JsObject, JsString}
 
@@ -28,8 +29,10 @@ import scala.util.{Failure, Success}
  */
 final case class SendEmailRequest(receiver: String, subject: String, content: String, sendTime: Option[String], overdueTime: Option[String])
 
-trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
-  implicit val f1 = jsonFormat5(SendEmailRequest)
+object EmailRouter {
+  trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
+    implicit val f1 = jsonFormat5(SendEmailRequest)
+  }
 }
 
 class EmailRouter(emailService: EmailService)(implicit system: ActorSystem[_]) extends SLF4JLogging with JsonSupport {

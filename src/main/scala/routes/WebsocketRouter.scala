@@ -7,6 +7,7 @@ import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.adapter._
 import akka.cluster.sharding.typed.scaladsl.ClusterSharding
 import akka.event.slf4j.SLF4JLogging
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import akka.http.scaladsl.model.ws.{Message, TextMessage}
 import akka.http.scaladsl.model.{HttpResponse, StatusCodes}
 import akka.http.scaladsl.server.Directives._
@@ -16,11 +17,15 @@ import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
 import akka.stream.{CompletionStrategy, OverflowStrategy}
 import akka.util.Timeout
 import org.reactivestreams.Publisher
+import routes.WebsocketRouter.{JsonSupport, SendOutChatMessageRequest}
 import services.UserService
+import spray.json.DefaultJsonProtocol
 
-import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.DurationInt
+import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Success}
+import spray.json._
+
 
 /**
  * routes
@@ -30,11 +35,14 @@ import scala.util.{Failure, Success}
  * @since 0.4.1
  */
 object WebsocketRouter {
-  val Ping = "ping"
-  val Pong = "pong"
+  trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
+    implicit val f1 = jsonFormat3(SendOutChatMessageRequest)
+  }
+
+  final case class SendOutChatMessageRequest(msgType: String, receiver: Long, msg: String)
 }
 
-class WebsocketRouter(userService: UserService)(implicit val system: ActorSystem[_]) extends SLF4JLogging {
+class WebsocketRouter(userService: UserService)(implicit val system: ActorSystem[_]) extends JsonSupport with SLF4JLogging {
   implicit val ec = system.executionContext
   implicit val timeout = Timeout(2.seconds)
   val clusterSharding = ClusterSharding(system)
@@ -45,7 +53,8 @@ class WebsocketRouter(userService: UserService)(implicit val system: ActorSystem
       case tm: TextMessage =>
         tm.toStrict(3.seconds).map(_.text)
           .flatMap { msg =>
-            userChatEntity.ask(replyTo => UserWsChatEntity.SendMessage(msg, replyTo))
+            val SendOutChatMessageRequest(msgType, receiver, message) = msg.parseJson.convertTo[SendOutChatMessageRequest]
+            userChatEntity.ask(replyTo => UserWsChatEntity.SendOutMessage(msgType, receiver, message, replyTo))
           }
       case _ =>
         Future.failed(new Exception("unsupported binaryMessage"))
