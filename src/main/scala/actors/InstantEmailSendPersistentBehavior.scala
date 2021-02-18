@@ -3,6 +3,7 @@ package actors
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior, SupervisorStrategy}
 import akka.cluster.typed.{ClusterSingleton, SingletonActor}
+import akka.pattern.StatusReply
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
 
@@ -23,14 +24,7 @@ object InstantEmailSendPersistentBehavior {
 
   case class EmailData(receiver: String, subject: String, content: String, sendTime: LocalDateTime)
 
-  final case class ApplySendEmail(emailData: EmailData, overdueTime: LocalDateTime, replyTo: ActorRef[ApplySendEmailResult]) extends Command
-
-  // reply
-  sealed trait Reply extends JacksonCborSerializable
-
-  sealed trait ApplySendEmailResult extends Reply
-
-  final case object ApplySendEmailSuccess extends ApplySendEmailResult
+  final case class ApplySendEmail(emailData: EmailData, overdueTime: LocalDateTime, replyTo: ActorRef[StatusReply[String]]) extends Command
 
   // event
   sealed trait Event extends JacksonJsonSerializable
@@ -44,7 +38,7 @@ object InstantEmailSendPersistentBehavior {
       command match {
         case ApplySendEmail(emailData, overdueTime, replyTo) =>
           val instantEmail = InstantEmail(emailData, overdueTime)
-          Effect.persist(instantEmail).thenReply(replyTo)(_ => ApplySendEmailSuccess)
+          Effect.persist(instantEmail).thenReply(replyTo)(_ => StatusReply.Success(""))
       }
     }
 

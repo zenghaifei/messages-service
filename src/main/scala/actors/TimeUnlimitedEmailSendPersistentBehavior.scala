@@ -1,8 +1,10 @@
 package actors
 
+import actors.GroupWsChatEntity.Reply
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior, SupervisorStrategy}
 import akka.cluster.typed.{ClusterSingleton, SingletonActor}
+import akka.pattern.StatusReply
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
 
@@ -23,12 +25,7 @@ object TimeUnlimitedEmailSendPersistentBehavior {
 
   case class EmailData(receiver: String, subject: String, content: String, sendTime: LocalDateTime)
 
-  final case class ApplySendEmail(emailData: EmailData, replyTo: ActorRef[Reply]) extends Command
-
-  // reply
-  sealed trait Reply extends JacksonCborSerializable
-
-  final case object ApplySendEmailSuccess extends Reply
+  final case class ApplySendEmail(emailData: EmailData, replyTo: ActorRef[StatusReply[String]]) extends Command
 
   // event
   sealed trait Event extends JacksonJsonSerializable
@@ -42,7 +39,7 @@ object TimeUnlimitedEmailSendPersistentBehavior {
       command match {
         case ApplySendEmail(emailData, replyTo) =>
           val email = TimeUnlimitedEmail(emailData)
-          Effect.persist(email).thenReply(replyTo)(_ => ApplySendEmailSuccess)
+          Effect.persist(email).thenReply(replyTo)(_ => StatusReply.Success(""))
       }
     }
 

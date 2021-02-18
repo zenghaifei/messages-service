@@ -1,7 +1,6 @@
 package routes
 
 import actors.EmailSenderBehavior.EmailType
-import actors.InstantEmailSendPersistentBehavior.ApplySendEmailSuccess
 import actors.{EmergencyEmailSendPersistentBehavior, InstantEmailSendPersistentBehavior, TimeUnlimitedEmailSendPersistentBehavior}
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.AskPattern.Askable
@@ -56,7 +55,7 @@ class EmailRouter(emailService: EmailService)(implicit system: ActorSystem[_]) e
               val emailSendActor = EmergencyEmailSendPersistentBehavior.initSingleton(this.system)
               val sendTime = sendTimeOpt.map(LocalDateTime.parse(_)).getOrElse(now)
               val emailData = EmergencyEmailSendPersistentBehavior.EmailData(receiver, subject, content, sendTime)
-              emailSendActor.ask(replyTo => EmergencyEmailSendPersistentBehavior.ApplySendEmail(emailData, replyTo))
+              emailSendActor.askWithStatus(replyTo => EmergencyEmailSendPersistentBehavior.ApplySendEmail(emailData, replyTo))
                 .map(_ => complete(JsObject(
                   "code" -> JsNumber(0),
                   "msg" -> JsString("success")
@@ -69,8 +68,8 @@ class EmailRouter(emailService: EmailService)(implicit system: ActorSystem[_]) e
                   Future(complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString("overdueTime is required"))))
                 case Some(overdueTime) =>
                   val emailData = InstantEmailSendPersistentBehavior.EmailData(receiver, subject, content, sendTime)
-                  emailSendActor.ask(replyTo => InstantEmailSendPersistentBehavior.ApplySendEmail(emailData, overdueTime, replyTo))
-                    .map { case ApplySendEmailSuccess =>
+                  emailSendActor.askWithStatus(replyTo => InstantEmailSendPersistentBehavior.ApplySendEmail(emailData, overdueTime, replyTo))
+                    .map { _ =>
                       complete(JsObject(
                         "code" -> JsNumber(0),
                         "msg" -> JsString("success")
