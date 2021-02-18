@@ -5,6 +5,7 @@ import akka.actor.typed.{ActorRef, Behavior, SupervisorStrategy}
 import akka.cluster.sharding.typed.ShardingEnvelope
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity, EntityRef, EntityTypeKey}
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
+import akka.pattern.StatusReply
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
 import akka.util.Timeout
@@ -26,24 +27,13 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
   // command
   sealed trait Command extends JacksonCborSerializable
 
-  final case class RegisterWsActor(wsActor: ActorRef[String], replyTo: ActorRef[RegisterWsActorResult]) extends Command
+  final case class RegisterWsActor(wsActor: ActorRef[String], replyTo: ActorRef[StatusReply[String]]) extends Command
 
   final case class UnRegisterWsActor(wsActor: ActorRef[String]) extends Command
 
-  final case class SendOutMsg(msgType: String, receiver: Long, msg: String, replyTo: ActorRef[SendResult]) extends Command
+  final case class SendOutMsg(msgType: String, receiver: Long, msg: String, replyTo: ActorRef[StatusReply[String]]) extends Command
 
-  final case class SendInMsg(msgType: String, sender: Long, msg: String, replyTo: ActorRef[SendResult]) extends Command
-
-  // reply
-  sealed trait Reply extends JacksonCborSerializable
-
-  sealed trait SendResult extends Reply
-
-  final case object SendSuccess extends SendResult
-
-  sealed trait RegisterWsActorResult extends Reply
-
-  final case object RegisterWsActorSuccess extends RegisterWsActorResult
+  final case class SendInMsg(msgType: String, sender: Long, msg: String, replyTo: ActorRef[StatusReply[String]]) extends Command
 
   // event
   sealed trait Event extends JacksonJsonSerializable
@@ -78,6 +68,7 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
     implicit val ec = context.executionContext
     implicit val timeout = Timeout(5.seconds)
     implicit val f1 = jsonFormat3(MsgReceived)
+    val logger = context.log
 
     val wsActors = mutable.TreeSet.empty[ActorRef[String]]
 
@@ -86,41 +77,41 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
       emptyState = State(),
       commandHandler = (state, command) => command match {
         case RegisterWsActor(wsActor, replyTo) =>
-          context.log.info("registered wsActor, userId: {}", userId)
+          logger.info("registered wsActor, userId: {}", userId)
           wsActors.add(wsActor)
           context.watchWith(wsActor, UnRegisterWsActor(wsActor))
           if (wsActors.size == 1) {
             state.msgs.foreach(wsActor ! _.toJson.toString())
-            Effect.persist(MsgsRead).thenReply(replyTo)(_ => RegisterWsActorSuccess)
+            Effect.persist(MsgsRead).thenReply(replyTo)(_ => StatusReply.Success(""))
           }
           else {
-            Effect.none.thenReply(replyTo)(_ => RegisterWsActorSuccess)
+            Effect.none.thenReply(replyTo)(_ => StatusReply.Success(""))
           }
         case UnRegisterWsActor(wsActor) =>
-          context.log.info("unRegistered wsActor, userId: {}", userId)
+          logger.info("unRegistered wsActor, userId: {}", userId)
           wsActors.remove(wsActor)
           Effect.none.thenNoReply()
         case SendOutMsg(msgType, receiver, msg, replyTo) =>
           msgType match {
             case MsgType.P2P =>
               val receiverChatEntity = UserWsChatEntity.selectEntity(receiver, clusterSharding)
-              val sendResultF = receiverChatEntity.ask(actorRef => SendInMsg(msgType, userId, msg, actorRef))
+              val sendResultF = receiverChatEntity.askWithStatus(actorRef => SendInMsg(msgType, userId, msg, actorRef))
               sendResultF.onComplete {
                 case Success(_) => ()
                 case Failure(ex) =>
-                  context.log.warn("ask receiver entity failed, msg: {}, stack: {}", ex.getMessage, ex.fillInStackTrace())
+                  logger.warn("ask receiver entity failed, sender: {}, receiver: {}, msg: {}, stack: {}", userId, receiver, ex.getMessage, ex.fillInStackTrace())
               }
-              Effect.none.thenReply(replyTo)(_ => SendSuccess)
+              Effect.none.thenReply(replyTo)(_ => StatusReply.Success(""))
             case msgType: String =>
-              context.log.warn("unsupported msg type: {}", msgType)
-              Effect.none.thenReply(replyTo)(_ => SendSuccess)
+              logger.warn("unsupported msg type: {}", msgType)
+              Effect.none.thenReply(replyTo)(_ => StatusReply.Success(""))
           }
         case SendInMsg(msgType, sender, msg, replyTo) =>
           val chatMessageReceived = MsgReceived(msgType, sender, msg)
           wsActors.foreach { wsActor =>
             wsActor ! chatMessageReceived.toJson.toString()
           }
-          Effect.persist(chatMessageReceived).thenReply(replyTo)(_ => SendSuccess)
+          Effect.persist(chatMessageReceived).thenReply(replyTo)(_ => StatusReply.Success(""))
       },
       eventHandler = (state, event) => event match {
         case event: MsgReceived =>
