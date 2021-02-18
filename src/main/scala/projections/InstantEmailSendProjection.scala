@@ -63,13 +63,11 @@ class InstantEmailSendHandler(system: ActorSystem[_]) extends Handler[EventEnvel
           Future(Done)
         }
         else {
-          emailSendDispatcherActor.ask(ref => EmailSenderBehavior.SendEmail(receiver, subject, content, EmailType.instant, ref))
-            .map {
-              case EmailSenderBehavior.SendEmailSuccess =>
-                Done
-              case EmailSenderBehavior.SendEmailFailed(msg) =>
-                log.warn(s"send email failed, receiver: ${receiver}, subject: ${subject}, msg: ${msg}")
-                Done
+          emailSendDispatcherActor.askWithStatus(ref => EmailSenderBehavior.SendEmail(receiver, subject, content, EmailType.instant, ref))
+            .map(_ => Done)
+            .recover { case ex: Throwable =>
+              log.warn(s"send email failed, receiver: ${receiver}, subject: ${subject}, msg: ${ex.getMessage}")
+              Done
             }
         }
     }

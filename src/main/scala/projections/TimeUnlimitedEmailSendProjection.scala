@@ -55,14 +55,12 @@ class TimeUnlimitedEmailSendHandler(system: ActorSystem[_]) extends Handler[Even
       case TimeUnlimitedEmail(emailData: EmailData) =>
         val EmailData(receiver, subject, content, _) = emailData
         val emailSendDispatcherActor = EmailSendDispatcherBehavior.initSingleton(this.system)
-        emailSendDispatcherActor.ask(ref => EmailSenderBehavior.SendEmail(receiver, subject, content, EmailType.timeUnlimited, ref))
-        .map {
-          case EmailSenderBehavior.SendEmailSuccess =>
+        emailSendDispatcherActor.askWithStatus(ref => EmailSenderBehavior.SendEmail(receiver, subject, content, EmailType.timeUnlimited, ref))
+          .map(_ => Done)
+          .recover { case ex: Throwable =>
+            log.warn(s"send email failed, receiver: ${receiver}, subject: ${subject}, msg: ${ex.getMessage}")
             Done
-          case EmailSenderBehavior.SendEmailFailed(msg) =>
-            log.warn(s"send email failed, receiver: ${receiver}, subject: ${subject}, msg: ${msg}")
-            Done
-        }
+          }
     }
   }
 }

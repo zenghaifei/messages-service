@@ -4,6 +4,7 @@ import akka.actor.PoisonPill
 import akka.actor.typed.scaladsl.{Behaviors, StashBuffer}
 import akka.actor.typed.{ActorRef, Behavior}
 import akka.dispatch.{BoundedStablePriorityMailbox, PriorityGenerator}
+import akka.pattern.StatusReply
 import services.EmailService
 
 import scala.concurrent.duration.DurationInt
@@ -27,18 +28,11 @@ object EmailSenderBehavior {
     val timeUnlimited = "timeUnlimited"
   }
 
-  final case class SendEmail(receiver: String, subject: String, content: String, emailType: String, replyTo: ActorRef[Reply]) extends Command
+  final case class SendEmail(receiver: String, subject: String, content: String, emailType: String, replyTo: ActorRef[StatusReply[String]]) extends Command
 
-  final case class SendOutSuccess(replyTo: ActorRef[Reply]) extends Command
+  final case class SendOutSuccess(replyTo: ActorRef[StatusReply[String]]) extends Command
 
-  final case class SendOutFailed(msg: String, replyTo: ActorRef[Reply]) extends Command
-
-  // reply
-  sealed trait Reply extends JacksonCborSerializable
-
-  final case object SendEmailSuccess extends Reply
-
-  final case class SendEmailFailed(msg: String) extends Reply
+  final case class SendOutFailed(msg: String, replyTo: ActorRef[StatusReply[String]]) extends Command
 
   // state
   sealed trait State extends JacksonCborSerializable
@@ -87,10 +81,10 @@ object EmailSenderBehavior {
                 Behaviors.same
             }
           case SendOutSuccess(replyTo) =>
-            replyTo ! SendEmailSuccess
+            replyTo ! StatusReply.Success("")
             buffer.unstash(updated(ReadyState), 1, command => command)
           case SendOutFailed(msg, replyTo) =>
-            replyTo ! SendEmailFailed(msg)
+            replyTo ! StatusReply.Error(msg)
             updated(ReadyState)
         }
       }
