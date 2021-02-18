@@ -30,9 +30,9 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
 
   final case class UnRegisterWsActor(wsActor: ActorRef[String]) extends Command
 
-  final case class SendOutMessage(msgType: String, receiver: Long, msg: String, replyTo: ActorRef[SendResult]) extends Command
+  final case class SendOutMsg(msgType: String, receiver: Long, msg: String, replyTo: ActorRef[SendResult]) extends Command
 
-  final case class SendInMessage(msgType: String, sender: Long, msg: String, replyTo: ActorRef[SendResult]) extends Command
+  final case class SendInMsg(msgType: String, sender: Long, msg: String, replyTo: ActorRef[SendResult]) extends Command
 
   // reply
   sealed trait Reply extends JacksonCborSerializable
@@ -48,10 +48,12 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
   // event
   sealed trait Event extends JacksonJsonSerializable
 
-  final case class ChatMessageReceived(msgType: String, sender: Long, msg: String) extends Event
+  final case class MsgReceived(msgType: String, sender: Long, msg: String) extends Event
+
+  final case object MsgsRead extends Event
 
   // state
-  final case class State(msgs: mutable.ListBuffer[ChatMessageReceived] = mutable.ListBuffer.empty) extends JacksonCborSerializable
+  final case class State(msgs: mutable.ListBuffer[MsgReceived] = mutable.ListBuffer.empty) extends JacksonCborSerializable
 
   object MsgType {
     val P2P = "P2P"
@@ -75,7 +77,7 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
     val clusterSharding = ClusterSharding(context.system)
     implicit val ec = context.executionContext
     implicit val timeout = Timeout(5.seconds)
-    implicit val f1 = jsonFormat3(ChatMessageReceived)
+    implicit val f1 = jsonFormat3(MsgReceived)
 
     val wsActors = mutable.TreeSet.empty[ActorRef[String]]
 
@@ -89,18 +91,20 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
           context.watchWith(wsActor, UnRegisterWsActor(wsActor))
           if (wsActors.size == 1) {
             state.msgs.foreach(wsActor ! _.toJson.toString())
-            state.msgs.clear()
+            Effect.persist(MsgsRead).thenReply(replyTo)(_ => RegisterWsActorSuccess)
           }
-          Effect.none.thenReply(replyTo)(_ => RegisterWsActorSuccess)
+          else {
+            Effect.none.thenReply(replyTo)(_ => RegisterWsActorSuccess)
+          }
         case UnRegisterWsActor(wsActor) =>
           context.log.info("unRegistered wsActor, userId: {}", userId)
           wsActors.remove(wsActor)
           Effect.none.thenNoReply()
-        case SendOutMessage(msgType, receiver, msg, replyTo) =>
+        case SendOutMsg(msgType, receiver, msg, replyTo) =>
           msgType match {
             case MsgType.P2P =>
               val receiverChatEntity = UserWsChatEntity.selectEntity(receiver, clusterSharding)
-              val sendResultF = receiverChatEntity.ask(actorRef => SendInMessage(msgType, userId, msg, actorRef))
+              val sendResultF = receiverChatEntity.ask(actorRef => SendInMsg(msgType, userId, msg, actorRef))
               sendResultF.onComplete {
                 case Success(_) => ()
                 case Failure(ex) =>
@@ -111,19 +115,21 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
               context.log.warn("unsupported msg type: {}", msgType)
               Effect.none.thenReply(replyTo)(_ => SendSuccess)
           }
-        case SendInMessage(msgType, sender, msg, replyTo) =>
-          val chatMessageReceived = ChatMessageReceived(msgType, sender, msg)
-          if (wsActors.isEmpty) {
-            state.msgs.addOne(chatMessageReceived)
-          }
+        case SendInMsg(msgType, sender, msg, replyTo) =>
+          val chatMessageReceived = MsgReceived(msgType, sender, msg)
           wsActors.foreach { wsActor =>
             wsActor ! chatMessageReceived.toJson.toString()
           }
           Effect.persist(chatMessageReceived).thenReply(replyTo)(_ => SendSuccess)
       },
       eventHandler = (state, event) => event match {
-        case event: ChatMessageReceived =>
-          state.msgs.addOne(event)
+        case event: MsgReceived =>
+          if (wsActors.isEmpty) {
+            state.msgs.addOne(event)
+          }
+          state
+        case MsgsRead =>
+          state.msgs.clear()
           state
       }
     )

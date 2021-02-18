@@ -54,7 +54,7 @@ class WebsocketRouter(userService: UserService)(implicit val system: ActorSystem
         tm.toStrict(3.seconds).map(_.text)
           .flatMap { msg =>
             val SendOutChatMessageRequest(msgType, receiver, message) = msg.parseJson.convertTo[SendOutChatMessageRequest]
-            userChatEntity.ask(replyTo => UserWsChatEntity.SendOutMessage(msgType, receiver, message, replyTo))
+            userChatEntity.ask(replyTo => UserWsChatEntity.SendOutMsg(msgType, receiver, message, replyTo))
           }
       case _ =>
         Future.failed(new Exception("unsupported binaryMessage"))
