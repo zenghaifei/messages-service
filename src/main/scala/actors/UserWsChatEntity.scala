@@ -8,7 +8,7 @@ import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import akka.pattern.StatusReply
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
-import akka.util.{ConcurrentMultiMap, Timeout}
+import akka.util.Timeout
 import spray.json.DefaultJsonProtocol
 
 import scala.collection.mutable
