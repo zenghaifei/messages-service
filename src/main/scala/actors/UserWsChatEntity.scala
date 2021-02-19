@@ -8,7 +8,7 @@ import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import akka.pattern.StatusReply
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
-import akka.util.Timeout
+import akka.util.{ConcurrentMultiMap, Timeout}
 import spray.json.DefaultJsonProtocol
 
 import scala.collection.mutable
@@ -31,24 +31,36 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
 
   final case class UnRegisterWsActor(wsActor: ActorRef[String]) extends Command
 
-  final case class SendOutMsg(msgType: String, receiver: Long, msg: String, replyTo: ActorRef[StatusReply[String]]) extends Command
+  final case class SendOutP2pMsg(receiver: Long, msg: String, replyTo: ActorRef[StatusReply[String]]) extends Command
 
-  final case class SendInMsg(msgType: String, sender: Long, msg: String, replyTo: ActorRef[StatusReply[String]]) extends Command
+  final case class SendOutP2pMsgSuccess(p2pMsgSent: P2pMsgSent, replyTo: ActorRef[StatusReply[String]]) extends Command
+
+  final case class SendInP2pMsg(sender: Long, msg: String, replyTo: ActorRef[StatusReply[String]]) extends Command
+
+  final case class SendOutP2gMsg(groupId: Long, msg: String, replyTo: ActorRef[StatusReply[String]]) extends Command
+
+  final case class SendOutP2gMsgSuccess(p2gMsgSent: P2gMsgSent, replyTo: ActorRef[StatusReply[String]]) extends Command
+
+  final case class SendInG2pMsg(groupId: Long, sender: Long, msg: String) extends Command
+
+  final case class SendFail(msg: String, replyTo: ActorRef[StatusReply[String]]) extends Command
 
   // event
   sealed trait Event extends JacksonJsonSerializable
 
-  final case class MsgReceived(msgType: String, sender: Long, msg: String) extends Event
+  final case class P2pMsgSent(receiver: Long, msg: String) extends Event
+
+  final case class P2pMsgReceived(sender: Long, msg: String) extends Event
+
+  final case class P2gMsgSent(groupId: Long, msg: String) extends Event
+
+  final case class G2pMsgReceived(groupId: Long, sender: Long, msg: String) extends Event
 
   final case object MsgsRead extends Event
 
   // state
-  final case class State(msgs: mutable.ListBuffer[MsgReceived] = mutable.ListBuffer.empty) extends JacksonCborSerializable
-
-  object MsgType {
-    val P2P = "P2P"
-    val P2G = "P2G"
-  }
+  final case class State(p2pMsgs: mutable.ListBuffer[P2pMsgReceived] = mutable.ListBuffer.empty,
+                         g2pMsgs: mutable.ListBuffer[G2pMsgReceived] = mutable.ListBuffer.empty) extends JacksonCborSerializable
 
   val TypeKey = EntityTypeKey[Command]("user-websockets")
 
@@ -67,7 +79,8 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
     val clusterSharding = ClusterSharding(context.system)
     implicit val ec = context.executionContext
     implicit val timeout = Timeout(5.seconds)
-    implicit val f1 = jsonFormat3(MsgReceived)
+    implicit val f1 = jsonFormat2(P2pMsgReceived)
+    implicit val f2 = jsonFormat3(G2pMsgReceived)
     val logger = context.log
 
     val wsActors = mutable.TreeSet.empty[ActorRef[String]]
@@ -81,7 +94,8 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
           wsActors.add(wsActor)
           context.watchWith(wsActor, UnRegisterWsActor(wsActor))
           if (wsActors.size == 1) {
-            state.msgs.foreach(wsActor ! _.toJson.toString())
+            state.p2pMsgs.foreach(wsActor ! _.toJson.toString())
+            state.g2pMsgs.foreach(wsActor ! _.toJson.toString())
             Effect.persist(MsgsRead).thenReply(replyTo)(_ => StatusReply.Success(""))
           }
           else {
@@ -91,36 +105,61 @@ object UserWsChatEntity extends SprayJsonSupport with DefaultJsonProtocol {
           logger.info("unRegistered wsActor, userId: {}", userId)
           wsActors.remove(wsActor)
           Effect.none.thenNoReply()
-        case SendOutMsg(msgType, receiver, msg, replyTo) =>
-          msgType match {
-            case MsgType.P2P =>
-              val receiverChatEntity = UserWsChatEntity.selectEntity(receiver, clusterSharding)
-              val sendResultF = receiverChatEntity.askWithStatus(actorRef => SendInMsg(msgType, userId, msg, actorRef))
-              sendResultF.onComplete {
-                case Success(_) => ()
-                case Failure(ex) =>
-                  logger.warn("ask receiver entity failed, sender: {}, receiver: {}, msg: {}, stack: {}", userId, receiver, ex.getMessage, ex.fillInStackTrace())
-              }
-              Effect.none.thenReply(replyTo)(_ => StatusReply.Success(""))
-            case msgType: String =>
-              logger.warn("unsupported msg type: {}", msgType)
-              Effect.none.thenReply(replyTo)(_ => StatusReply.Success(""))
+        case SendOutP2pMsg(receiver, msg, replyTo) =>
+          val receiverChatEntity = UserWsChatEntity.selectEntity(receiver, clusterSharding)
+          context.askWithStatus(receiverChatEntity, actorRef => SendInP2pMsg(userId, msg, actorRef)) {
+            case Success(_) =>
+              val p2pMsgSent = P2pMsgSent(receiver, msg)
+              SendOutP2pMsgSuccess(p2pMsgSent, replyTo)
+            case Failure(ex) =>
+              logger.warn("ask receiver entity failed, sender: {}, receiver: {}, msg: {}, stack: {}", userId, receiver, ex.getMessage, ex.fillInStackTrace())
+              SendFail(ex.getMessage, replyTo)
           }
-        case SendInMsg(msgType, sender, msg, replyTo) =>
-          val chatMessageReceived = MsgReceived(msgType, sender, msg)
-          wsActors.foreach { wsActor =>
-            wsActor ! chatMessageReceived.toJson.toString()
+          Effect.none.thenNoReply()
+        case SendOutP2pMsgSuccess(p2pMsgSent, replyTo) =>
+          Effect.persist(p2pMsgSent).thenReply(replyTo)(_ => StatusReply.Success(""))
+        case SendInP2pMsg(sender, msg, replyTo) =>
+          val msgReceived = P2pMsgReceived(sender, msg)
+          wsActors.foreach(_ ! msgReceived.toJson.toString())
+          Effect.persist(msgReceived).thenReply(replyTo)(_ => StatusReply.Success(""))
+        case SendOutP2gMsg(groupId, msg, replyTo) =>
+          val groupEntity = GroupWsChatEntity.selectEntity(groupId, clusterSharding)
+          context.askWithStatus(groupEntity, actorRef => GroupWsChatEntity.BroadcastMsg(userId, msg, actorRef)) {
+            case Success(_) =>
+              val p2gMsgSent = P2gMsgSent(groupId, msg)
+              SendOutP2gMsgSuccess(p2gMsgSent, replyTo)
+            case Failure(ex) =>
+              logger.warn("ask receiver entity failed, sender: {}, groupId: {}, msg: {}, stack: {}", userId, groupId, ex.getMessage, ex.fillInStackTrace())
+              SendFail(ex.getMessage, replyTo)
           }
-          Effect.persist(chatMessageReceived).thenReply(replyTo)(_ => StatusReply.Success(""))
+          Effect.none.thenNoReply()
+        case SendOutP2gMsgSuccess(p2gMsgSent, replyTo) =>
+          Effect.persist(p2gMsgSent).thenReply(replyTo)(_ => StatusReply.Success(""))
+        case SendInG2pMsg(groupId, sender, msg) =>
+          val g2pMsgReceived = G2pMsgReceived(groupId, sender, msg)
+          wsActors.foreach(_ ! g2pMsgReceived.toJson.toString())
+          Effect.persist(g2pMsgReceived)
+        case SendFail(msg, replyTo) =>
+          Effect.none.thenReply(replyTo)(_ => StatusReply.Error(msg))
       },
       eventHandler = (state, event) => event match {
-        case event: MsgReceived =>
+        case event: P2pMsgSent =>
+          state
+        case event: P2pMsgReceived =>
           if (wsActors.isEmpty) {
-            state.msgs.addOne(event)
+            state.p2pMsgs.addOne(event)
+          }
+          state
+        case event: P2gMsgSent =>
+          state
+        case event: G2pMsgReceived =>
+          if (wsActors.isEmpty) {
+            state.g2pMsgs.addOne(event)
           }
           state
         case MsgsRead =>
-          state.msgs.clear()
+          state.p2pMsgs.clear()
+          state.g2pMsgs.clear()
           state
       }
     )

@@ -1,6 +1,6 @@
 package routes
 
-import actors.UserWsChatEntity
+import actors.{GroupWsChatEntity, UserWsChatEntity}
 import akka.Done
 import akka.actor.ActorRef
 import akka.actor.typed.ActorSystem
@@ -17,14 +17,13 @@ import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
 import akka.stream.{CompletionStrategy, OverflowStrategy}
 import akka.util.Timeout
 import org.reactivestreams.Publisher
-import routes.WebsocketRouter.{JsonSupport, SendOutChatMessageRequest}
+import routes.WebsocketRouter.{JoinChatGroupRequest, JsonSupport, MsgType, SendOutChatMessageRequest}
 import services.UserService
-import spray.json.DefaultJsonProtocol
+import spray.json.{DefaultJsonProtocol, _}
 
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Success}
-import spray.json._
 
 
 /**
@@ -35,11 +34,21 @@ import spray.json._
  * @since 0.4.1
  */
 object WebsocketRouter {
+
   trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
     implicit val f1 = jsonFormat3(SendOutChatMessageRequest)
+    implicit val f2 = jsonFormat2(JoinChatGroupRequest)
+  }
+
+  object MsgType {
+    val P2P = "P2P"
+    val P2G = "P2G"
   }
 
   final case class SendOutChatMessageRequest(msgType: String, receiver: Long, msg: String)
+
+  final case class JoinChatGroupRequest(userId: Long, groupId: Long)
+
 }
 
 class WebsocketRouter(userService: UserService)(implicit val system: ActorSystem[_]) extends JsonSupport with SLF4JLogging {
@@ -54,7 +63,12 @@ class WebsocketRouter(userService: UserService)(implicit val system: ActorSystem
         tm.toStrict(3.seconds).map(_.text)
           .flatMap { msg =>
             val SendOutChatMessageRequest(msgType, receiver, message) = msg.parseJson.convertTo[SendOutChatMessageRequest]
-            userChatEntity.ask(replyTo => UserWsChatEntity.SendOutMsg(msgType, receiver, message, replyTo))
+            msgType match {
+              case MsgType.P2P =>
+                userChatEntity.ask(replyTo => UserWsChatEntity.SendOutP2pMsg(receiver, message, replyTo))
+              case MsgType.P2G =>
+                userChatEntity.ask(replyTo => UserWsChatEntity.SendOutP2gMsg(receiver, message, replyTo))
+            }
           }
       case _ =>
         Future.failed(new Exception("unsupported binaryMessage"))
@@ -87,7 +101,7 @@ class WebsocketRouter(userService: UserService)(implicit val system: ActorSystem
     Flow.fromSinkAndSourceCoupled(sink, source)
   }
 
-  private def chat: Route = (path("messages" / "public" / "chat") & parameter("token")) { token =>
+  private def chat: Route = (path("messages" / "public" / "websocket" / "chat") & parameter("token")) { token =>
     val userIdOptF = this.userService.verifyToken(token)
     onComplete(userIdOptF) {
       case Failure(ex) =>
@@ -103,7 +117,24 @@ class WebsocketRouter(userService: UserService)(implicit val system: ActorSystem
     }
   }
 
-  val routes: Route = concat {
-    chat
+  private def joinGroup: Route = (path("messages" / "websocket" / "chat_group" / "join")) {
+    entity(as[JoinChatGroupRequest]) { case JoinChatGroupRequest(userId, groupId) =>
+      val groupEntity = GroupWsChatEntity.selectEntity(groupId, clusterSharding)
+      val joinResultF = groupEntity.askWithStatus(replyTo => GroupWsChatEntity.JoinGroup(userId, replyTo))
+      onComplete(joinResultF) {
+        case Success(_) =>
+          complete(HttpResponse(StatusCodes.OK))
+        case Failure(ex) =>
+          complete(JsObject(
+            "code" -> JsNumber(1),
+            "msg" -> JsString(ex.getMessage)
+          ))
+      }
+    }
   }
+
+  val routes: Route = concat(
+    chat,
+    joinGroup
+  )
 }

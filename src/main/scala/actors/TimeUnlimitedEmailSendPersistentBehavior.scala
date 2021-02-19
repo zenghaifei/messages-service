@@ -1,6 +1,5 @@
 package actors
 
-import actors.GroupWsChatEntity.Reply
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior, SupervisorStrategy}
 import akka.cluster.typed.{ClusterSingleton, SingletonActor}

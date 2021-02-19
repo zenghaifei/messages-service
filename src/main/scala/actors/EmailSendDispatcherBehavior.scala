@@ -1,7 +1,7 @@
 package actors
 
 import akka.actor.typed.scaladsl.Behaviors
-import akka.actor.typed.{ActorRef, ActorSystem, Behavior, MailboxSelector, SupervisorStrategy}
+import akka.actor.typed._
 import akka.cluster.typed.{ClusterSingleton, SingletonActor}
 
 /**

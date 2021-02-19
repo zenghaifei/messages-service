@@ -1,4 +1,4 @@
-import actors.UserWsChatEntity
+import actors.{GroupWsChatEntity, UserWsChatEntity}
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import akka.cluster.sharding.typed.scaladsl.ClusterSharding
@@ -17,6 +17,7 @@ object App extends SwaggerSite {
 
       val sharding = ClusterSharding(system)
       UserWsChatEntity.shardRegion(sharding)
+      GroupWsChatEntity.shardRegion(sharding)
 
       val emailService = new EmailService(config)
       val emailRouter = new EmailRouter(emailService)
